@@ -102,7 +102,7 @@ main { margin-left: var(--side); padding-top: var(--top); }
            background: linear-gradient(120deg, var(--text) 30%, var(--accent2) 70%, var(--accent3)); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .authors { color: var(--muted); font-size: 16px; margin: 0 0 30px; }
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-bottom: 30px; }
-.stat { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px; backdrop-filter: blur(8px); }
+.stat { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px 18px; }
 .stat .v { font-size: 34px; font-weight: 800; letter-spacing: -0.02em; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
 .stat .l { font-size: 13px; color: var(--muted); }
 .cta { display: flex; gap: 12px; flex-wrap: wrap; }
@@ -125,7 +125,7 @@ main { margin-left: var(--side); padding-top: var(--top); }
 .g3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .g4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .g5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; box-shadow: var(--shadow); backdrop-filter: blur(10px); min-width: 0; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px 20px; box-shadow: var(--shadow); min-width: 0; }
 .card h3 { margin: 0 0 6px; font-size: 16px; }
 .card .sub { color: var(--muted); font-size: 13.5px; margin: 0 0 10px; }
 .chart { width: 100%; height: 380px; }
@@ -1163,16 +1163,22 @@ function baseOpt(extra) {
   if (extra.tooltip && !Array.isArray(extra.tooltip)) out.tooltip = Object.assign({}, base.tooltip, extra.tooltip);
   return out;
 }
+// Charts are drawn when they come near the viewport and released when they are far from it, so that a long page
+// never holds more than a few dozen canvases (rec.keep keeps a chart whose zoom state matters).
 const chartObserver = ('IntersectionObserver' in window) ? new IntersectionObserver(entries => {
   for (const en of entries) {
-    if (!en.isIntersecting) continue;
-    chartObserver.unobserve(en.target);
-    const rec = en.target.__rec;
-    if (rec && !rec.inst) rec.draw();
+    const rec = en.target.__rec; if (!rec) continue;
+    if (en.isIntersecting) { if (!rec.inst) rec.draw(); }
+    else if (rec.inst && !rec.keep) { rec.inst.dispose(); rec.inst = null; }
   }
-}, { rootMargin: '500px 0px' }) : null;
+}, { rootMargin: '1400px 0px' }) : null;
 function gcCharts() {
-  S.charts = S.charts.filter(c => { if (c.inst && !document.body.contains(c.div)) { c.inst.dispose(); return false; } return true; });
+  S.charts = S.charts.filter(c => {
+    if (document.body.contains(c.div)) return true;
+    if (c.inst) c.inst.dispose();
+    if (chartObserver) chartObserver.unobserve(c.div);
+    return false;
+  });
 }
 /** A chart that is drawn when it first comes near the viewport and redrawn by rec.draw() (e.g. after a theme change). */
 function mkChart(container, optFn, cls) {
@@ -1182,7 +1188,7 @@ function mkChart(container, optFn, cls) {
   const rec = { div, optFn, inst: null };
   rec.draw = () => {
     if (rec.inst) rec.inst.dispose();
-    rec.inst = echarts.init(div, null, { renderer: 'canvas' });
+    rec.inst = echarts.init(div, null, { renderer: 'canvas', devicePixelRatio: Math.min(2, window.devicePixelRatio || 1) });
     rec.w = div.clientWidth;
     try { rec.inst.setOption(optFn(div)); } catch (e) { console.error('chart failed', e); div.innerHTML = '<div class="loading">This chart could not be drawn.</div>'; }
   };
@@ -1967,6 +1973,7 @@ section('timeline', '10', 'Results', 'Scores over the evaluation period',
         });
       });
       rec.div.style.height = (top + ms.length * (H + gap) + 50) + 'px';
+      rec.keep = true;
       const ne = T.events.length;
       info.innerHTML = `<span><b>${n.toLocaleString('en')}</b> points${T.bucket > 1 ? ` (maximum over ${T.bucket} consecutive windows of the ${T.n_windows.toLocaleString('en')})` : ' (one per window)'}</span>` +
         `<span><b>${ne}</b> evaluation events shaded</span><span>window ${T.win_s >= 600 ? T.win_s / 60 + ' min' : T.win_s + ' s'}, hop ${T.hop_s >= 300 ? T.hop_s / 60 + ' min' : T.hop_s + ' s'}</span>` +
